@@ -4,15 +4,25 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/cheggaaa/pb/v3"
-	"github.com/golang/glog"
 	"net"
 	"os"
 	"runtime"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/cheggaaa/pb/v3"
+	"github.com/golang/glog"
 )
+
+type TargetGroup struct {
+	Labels struct {
+		NetworkName string `json:"networkname"`
+	} `json:"labels"`
+	Targets []string `json:"targets"`
+}
+
+type TargetGroups []*TargetGroup
 
 func usage() {
 	_, _ = fmt.Fprintf(os.Stderr, "usage: example -stderrthreshold=[INFO|WARNING|FATAL] -log_dir=[string] -c config.yml\n")
@@ -27,22 +37,34 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	sdConfig, _ := readYaml(*configLocation)
+	sdConfig, _ := newSDConfig(*configLocation)
 
+	tgs := TargetGroups{}
+	for _, networks := range sdConfig.Networks {
+		hosts, _ := receiveHosts(networks.Network)
+		tg := sdConfig.FillTargets(hosts)
+		tg.Labels.NetworkName = networks.Labels[0].NetworkName
+		tgs = append(tgs, &tg)
+
+	}
+
+	result, err := json.MarshalIndent(tgs, "", "  ")
+	if err != nil {
+		glog.Fatal(err)
+	}
+	fmt.Println(string(result))
+	_ = os.WriteFile(*resultLocation, []byte(result), 0644)
+}
+
+func (s *SDConfig) FillTargets(hostList []string)  TargetGroup {
+	tg := TargetGroup{}
 	//set concurrency to the core count and multiply it
-	concurrency := runtime.NumCPU() * sdConfig.Concurrency
+	concurrency := runtime.NumCPU() * s.Concurrency
 	fmt.Println("Concurrency set to", concurrency)
 	semaphore := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
-	var hostList []string
-
-	for _, networks := range sdConfig.Networks {
-		hosts, _ := receiveHosts(networks.Network)
-		hostList = append(hostList, hosts...)
-	}
-
-	count := len(hostList)
+	count := len(tg.Targets)
 	bar := pb.StartNew(count)
 	bar.SetWriter(os.Stdout)
 
@@ -50,8 +72,8 @@ func main() {
 	for _, i := range hostList {
 		semaphore <- struct{}{}
 		wg.Add(1)
-		for _, port := range sdConfig.Port {
-			go IsOpen(i, strconv.Itoa(port), time.Duration(sdConfig.Timeout), hostChan, semaphore, &wg, bar)
+		for _, port := range s.Port {
+			go IsOpen(i, strconv.Itoa(port), time.Duration(s.Timeout), hostChan, semaphore, &wg, bar)
 		}
 	}
 	go func() {
@@ -59,26 +81,28 @@ func main() {
 		close(semaphore)
 		close(hostChan)
 	}()
-	result := ParseSDConfig(hostChan)
+	for i := range hostChan {
+		tg.Targets = append(tg.Targets, i)
+	}
 	bar.Finish()
-	fmt.Println(result)
-	_ = os.WriteFile(*resultLocation, []byte(result), 0644)
+	return tg
 }
 
 func ParseSDConfig(hosts chan string) string {
-	g := struct {
-		Targets []string `json:"targets"`
-		Labels  string   `json:"-"`
-	}{}
+	tg := TargetGroup{}
+	tg.Labels.NetworkName = "node_lab" 
 	for i := range hosts {
-		g.Targets = append(g.Targets, i)
+		tg.Targets = append(tg.Targets, i)
 	}
-	b, err := json.MarshalIndent(g, "", "  ")
+
+	tgs := []TargetGroup{tg}
+	b, err := json.MarshalIndent(tgs, "", "  ")
 	if err != nil {
 		fmt.Println(err)
 	}
 	return string(b)
 }
+
 func IsOpen(ip string, port string, timeout time.Duration, hostChannel chan string, semaphore chan struct{}, wg *sync.WaitGroup, pb *pb.ProgressBar) {
 	defer func() {
 		<-semaphore
@@ -99,6 +123,7 @@ func IsOpen(ip string, port string, timeout time.Duration, hostChannel chan stri
 		return
 	}
 }
+
 func parseHosts(cidr string) ([]string, error) {
 	ip, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -112,6 +137,7 @@ func parseHosts(cidr string) ([]string, error) {
 	// remove network address and broadcast address
 	return ips[1 : len(ips)-1], nil
 }
+
 func receiveHosts(ipNet string) ([]string, error) {
 	var hostList []string
 
@@ -126,6 +152,7 @@ func receiveHosts(ipNet string) ([]string, error) {
 	glog.Info("Total number of hosts to discover: ", len(hostList))
 	return hostList, nil
 }
+
 func inc(ip net.IP) {
 	for j := len(ip) - 1; j >= 0; j-- {
 		ip[j]++

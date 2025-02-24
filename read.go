@@ -16,11 +16,13 @@ type SDConfig struct {
 }
 
 type Networks struct {
-	Labels  []string `yaml:"labels"`
+	Labels  []struct {
+		NetworkName string `yaml:"networkname"`
+	} `yaml:"labels"`
 	Network string   `yaml:"network"`
 }
 
-func readYaml(filename string) (*SDConfig,error) {
+func newSDConfig(filename string) (*SDConfig,error) {
 	var hosts SDConfig
 	yamlFile, err := os.Open(filename)
 	if err != nil {

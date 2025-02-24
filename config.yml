@@ -1,6 +1,11 @@
 networks:
-  - network: 10.75.77.0/28
+  - network: 10.10.10.0/24
+    labels:
+      - networkname: "node_lab"
+  - network: 10.10.11.0/24
+    labels:
+      - networkname: "vlan"
 concurrency: 5
 port:
-  - 8080
+  - 9100
 timeout: 5
