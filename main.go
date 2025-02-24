@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"github.com/cheggaaa/pb/v3"
 	"github.com/golang/glog"
-	"io/ioutil"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -29,7 +29,10 @@ func main() {
 
 	sdConfig, _ := readYaml(*configLocation)
 
-	semaphore := make(chan struct{}, 5)
+	//set concurrency to the core count and multiply it
+	concurrency := runtime.NumCPU() * sdConfig.Concurrency
+	fmt.Println("Concurrency set to", concurrency)
+	semaphore := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
 	var hostList []string
@@ -48,7 +51,7 @@ func main() {
 		semaphore <- struct{}{}
 		wg.Add(1)
 		for _, port := range sdConfig.Port {
-			go IsOpen(i, strconv.Itoa(port), time.Duration(sdConfig.Concurrency), hostChan, semaphore, &wg, bar)
+			go IsOpen(i, strconv.Itoa(port), time.Duration(sdConfig.Timeout), hostChan, semaphore, &wg, bar)
 		}
 	}
 	go func() {
@@ -59,7 +62,7 @@ func main() {
 	result := ParseSDConfig(hostChan)
 	bar.Finish()
 	fmt.Println(result)
-	_ = ioutil.WriteFile(*resultLocation, []byte(result), 0644)
+	_ = os.WriteFile(*resultLocation, []byte(result), 0644)
 }
 
 func ParseSDConfig(hosts chan string) string {
@@ -117,9 +120,8 @@ func receiveHosts(ipNet string) ([]string, error) {
 		glog.Error(err)
 		return nil, err
 	}
-	for _, host := range hosts {
-		hostList = append(hostList, host)
-	}
+	
+	hostList = append(hostList, hosts...)
 
 	glog.Info("Total number of hosts to discover: ", len(hostList))
 	return hostList, nil

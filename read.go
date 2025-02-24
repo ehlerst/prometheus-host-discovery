@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/golang/glog"
-	"gopkg.in/yaml"
-	"io/ioutil"
+	"gopkg.in/yaml.v3"
+	"io"
 	"os"
 )
 
@@ -27,7 +27,7 @@ func readYaml(filename string) (*SDConfig,error) {
 		glog.Error("cant open: ",filename," ",err)
 		return nil, err
 	}
-	byteValue, _ := ioutil.ReadAll(yamlFile)
+	byteValue, _ := io.ReadAll(yamlFile)
 	err = yaml.Unmarshal(byteValue,&hosts)
 	if err != nil {
 		glog.Error("cant parse: ",filename," ",err)
